@@ -1,228 +1,59 @@
-import os
 import json
-import re
+from pathlib import Path
 import discord
 
-# Default Custom Discord Emojis
-DEFAULT_EMOJIS = {
-    # Help Categories
-    "security": "<:security:000000000000000000>",
-    "antinuke": "🛡️",
-    "antiraid": "🛡️",
-    "permit_commands": "<:permit_commands:000000000000000000>",
-    "permit": "👑",
-    "automod": "<:automod:000000000000000000>",
-    "moderation": "<:moderation:000000000000000000>",
-    "general": "<:general:000000000000000000>",
-    "games": "🎮",
-    "embed_system": "<:embed_system:000000000000000000>",
-    "embed": "❇️",
-    "utility": "<:utility:000000000000000000>",
-    "automations": "<:automations:000000000000000000>",
-    "automation": "🔗",
-    "autoresponders": "💖",
-    "greetings": "<:greetings:000000000000000000>",
-    "welcome": "🚪",
-    "custom_roles": "<:custom_roles:000000000000000000>",
-    "roles": "🤌",
-    "voice_commands": "<:voice_commands:000000000000000000>",
-    "voice": "🔊",
-    "tickets": "<:tickets:000000000000000000>",
-    "helpdesk": "🐍",
-    "logging": "<:logging:000000000000000000>",
-    "voice_master": "<:voice_master:000000000000000000>",
-    "join2create": "📢",
-    "j2c": "📢",
-    "bot_settings": "<:bot_settings:000000000000000000>",
-    "settings": "📡",
-    "branding": "📡",
-    "custom_branding": "📡",
-    "payments": "<:payments:000000000000000000>",
-    "success": "<:tick:1537988932447379457>",
-    "fail": "<:cross:1537988934007529544>",
-    "tick": "<:tick:1537988932447379457>",
-    "cross": "<:cross:1537988934007529544>",
-    "upi": "💳",
-    "ltc": "💳",
-    "giveaway": "<:giveaway:000000000000000000>",
-    "tracking": "<:tracking:000000000000000000>",
-    "leaderboard": "📊",
-    "social": "<:social:000000000000000000>",
-    "noprefix": "👑",
-    "owner": "<:owner:000000000000000000>",
-    "premium": "💎",
-    "premium_avon": "💎",
-    
-    # UI Elements & Statuses
-    "ticket_open": "🎫",
-    "lock": "🔒",
-    "warn": "⚠️",
-    "warning": "⚠️",
-    "mute": "🔇",
-    "kick": "👢",
-    "gwkick": "👢",
-    "ban": "🔨",
-    "global": "🌐",
-    "server": "🏠",
-    "delete": "🗑️",
-    "success": "<:tick:1537988932447379457>",
-    "error": "<:cross:1537988934007529544>",
-    "failed": "<:cross:1537988934007529544>",
+EMOJI_FILE = Path("emojis.json")
 
-    # Navigation & Indicators
-    "star": "⭐",
-    "link": "🔗",
-    "ping": "🏓",
-    "tip": "💡",
-    "arrow": "❯",
-    "bullet": "•",
-    "point": "👉",
-    "hide": "👻"
-}
 
-try:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-except NameError:
-    base_dir = "dist" if os.path.exists("dist/emojis.json") else "."
-EMOJIS_FILE = os.path.join(base_dir, "emojis.json")
+def load_emoji_ids():
+    if not EMOJI_FILE.exists():
+        return {}
 
-# Load customized emojis if exists, otherwise create it with defaults
-def load_emojis():
-    emojis = DEFAULT_EMOJIS.copy()
-    if os.path.exists(EMOJIS_FILE):
-        try:
-            with open(EMOJIS_FILE, "r", encoding="utf-8") as f:
-                user_configs = json.load(f)
-                for k, v in user_configs.items():
-                    if v:
-                        emojis[k] = v
-        except Exception as e:
-            print(f"Error loading emojis.json: {e}")
-    else:
-        try:
-            with open(EMOJIS_FILE, "w", encoding="utf-8") as f:
-                json.dump(DEFAULT_EMOJIS, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Error writing default emojis.json: {e}")
-    return emojis
-
-# Load on module import
-EMOJI_MAPPING = load_emojis()
-
-def reload_emojis():
-    global EMOJI_MAPPING
-    EMOJI_MAPPING = load_emojis()
-
-def save_emojis(new_emojis):
     try:
-        current = {}
-        if os.path.exists(EMOJIS_FILE):
-            with open(EMOJIS_FILE, "r", encoding="utf-8") as f:
-                current = json.load(f)
-        for k, v in new_emojis.items():
-            current[k] = v
-        with open(EMOJIS_FILE, "w", encoding="utf-8") as f:
-            json.dump(current, f, indent=4, ensure_ascii=False)
-        reload_emojis()
-    except Exception as e:
-        print(f"Error saving emojis: {e}")
+        with EMOJI_FILE.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
-bot_instance = None
+EMOJI_IDS = load_emoji_ids()
 
-UNICODE_FALLBACKS = {
-    "security": "🛡️",
-    "antinuke": "🛡️",
-    "antiraid": "🛡️",
-    "permit_commands": "👑",
-    "permit": "👑",
-    "automod": "▲",
-    "moderation": "⚒️",
-    "general": "👻",
-    "embed_system": "❇️",
-    "embed": "❇️",
-    "utility": "⚙️",
-    "automations": "🔗",
-    "automation": "🔗",
-    "autoresponders": "💖",
-    "greetings": "🚪",
-    "welcome": "🚪",
-    "custom_roles": "🤌",
-    "roles": "🤌",
-    "voice_commands": "🔊",
-    "voice": "🔊",
-    "tickets": "🐍",
-    "logging": "🦇",
-    "voice_master": "📢",
-    "join2create": "📢",
-    "j2c": "📢",
-    "bot_settings": "📡",
-    "settings": "📡",
-    "payments": "💳",
-    "upi": "💳",
-    "ltc": "💳",
-    "giveaway": "🎉",
-    "success": "<:tick:1537988932447379457>",
-    "fail": "<:cross:1537988934007529544>",
-    "tick": "<:tick:1537988932447379457>",
-    "cross": "<:cross:1537988934007529544>",
-    "tracking": "📊",
-    "social": "💬",
-    "owner": "👑",
-    "hide": "👻"
-}
 
-def parse_emoji_str(val: str) -> str:
-    if not val:
-        return ""
-    val = str(val).strip()
-    gif_match = re.match(r"https?://cdn\.discordapp\.com/emojis/(\d+)\.gif(?:\?\S*)?", val)
-    if gif_match:
-        return f"<a:custom:{gif_match.group(1)}>"
-    png_match = re.match(r"https?://cdn\.discordapp\.com/emojis/(\d+)\.(?:png|webp)(?:\?\S*)?", val)
-    if png_match:
-        return f"<:custom:{png_match.group(1)}>"
-    return val
+def get_emoji(bot: discord.Client, name: str, fallback: str = "") -> str:
+    """
+    Get an external Discord custom emoji.
 
-def get_emoji(name: str) -> str:
-    """Get the string representation of a custom emoji (<:name:id> or <a:name:id>)."""
-    if not name:
-        return ""
-    name_str = str(name).strip()
+    Works even when the emoji isn't in the bot's current guild,
+    as long as the ID is valid and the emoji is usable externally.
+    """
+    emoji_id = EMOJI_IDS.get(name)
 
-    parsed_cdn = parse_emoji_str(name_str)
-    if parsed_cdn != name_str:
-        return parsed_cdn
+    if not emoji_id:
+        return fallback
 
-    if name_str.startswith("<:") or name_str.startswith("<a:"):
-        return name_str
+    try:
+        emoji_id = int(emoji_id)
+    except (TypeError, ValueError):
+        return fallback
 
-    clean_name = name_str.lower().replace(" ", "_")
-    if clean_name.startswith("ani_"):
-        clean_name = clean_name[4:]
+    # First try Discord's cache.
+    emoji = bot.get_emoji(emoji_id)
 
-    emoji_str = EMOJI_MAPPING.get(clean_name, "") or DEFAULT_EMOJIS.get(clean_name, "")
-    if emoji_str and "000000000000000000" not in emoji_str:
-        return emoji_str
+    if emoji:
+        return str(emoji)
 
-    return UNICODE_FALLBACKS.get(clean_name, "")
+    # External emoji format.
+    return f"<:_{name}:{emoji_id}>"
 
-def get_ui_emoji(name: str):
-    """Get the emoji object for Discord UI components (Buttons, SelectOptions)."""
-    if not name:
+
+def get_emoji_object(bot: discord.Client, name: str):
+    """Return the cached Discord Emoji object if available."""
+    emoji_id = EMOJI_IDS.get(name)
+
+    if not emoji_id:
         return None
-    name_str = str(name).strip()
-    clean_name = name_str.lower().replace(" ", "_")
-    if clean_name.startswith("ani_"):
-        clean_name = clean_name[4:]
 
-    emoji_str = get_emoji(clean_name) or name_str
-
-    if emoji_str and (emoji_str.startswith("<:") or emoji_str.startswith("<a:")):
-        try:
-            return discord.PartialEmoji.from_str(emoji_str)
-        except Exception:
-            return UNICODE_FALLBACKS.get(clean_name, "🌐")
-
-    return emoji_str
-
+    try:
+        return bot.get_emoji(int(emoji_id))
+    except (TypeError, ValueError):
+        return None
