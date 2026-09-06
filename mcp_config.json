@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "Vireon-sentinel-logger": {
+      "command": "python",
+      "args": [
+        "C:/New folder/Codes/bots/Vireon/scripts/sentinel_logger_mcp.py"
+      ],
+      "env": {
+        "SENTINEL_DASHBOARD_URL": "http://localhost:3000",
+        "SENTINEL_INGEST_TOKEN": ""
+      }
+    }
+  }
+}
