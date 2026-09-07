@@ -7,94 +7,67 @@ import discord
 from discord.ext import commands
 
 
+# =========================
+# PATHS
+# =========================
+
 DATA_DIR = Path("data")
-DATA_FILE = DATA_DIR / "vouches.json"
-DB_FILE = DATA_DIR / "vouch.db"
+JSON_FILE = DATA_DIR / "vouches.json"
+DB_FILE = Path("vouch.db")
+
+
+# =========================
+# +REP REGEX
+# =========================
 
 VOUCH_RE = re.compile(
-    r"^\+rep\s+<@!?(\d+)>\s+(.+)$",
+    r"^\s*\+rep\s+<@!?(\d+)>\s+(.+?)\s*$",
     re.IGNORECASE | re.DOTALL,
 )
 
 
 # =========================
-# JSON
-# =========================
-
-def load_data():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not DATA_FILE.exists():
-        data = {}
-        DATA_FILE.write_text(
-            json.dumps(data, indent=2),
-            encoding="utf-8",
-        )
-        return data
-
-    try:
-        data = json.loads(
-            DATA_FILE.read_text(encoding="utf-8")
-        )
-        return data if isinstance(data, dict) else {}
-
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
-def save_data(data):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    DATA_FILE.write_text(
-        json.dumps(data, indent=2),
-        encoding="utf-8",
-    )
-
-
-# =========================
-# SQLITE DATABASE
+# DATABASE
 # =========================
 
 def init_database():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS vouches (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id TEXT NOT NULL,
-                target_id TEXT NOT NULL,
-                author_id TEXT NOT NULL,
-                review TEXT NOT NULL,
-                timestamp TEXT NOT NULL
-            )
-            """
-        )
+        with sqlite3.connect(DB_FILE) as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS vouches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    author_id INTEGER NOT NULL,
+                    review TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                )
+            """)
 
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_vouches_target
-            ON vouches(guild_id, target_id)
-            """
-        )
+            db.commit()
 
-        conn.commit()
+        print("[VOUCH] vouch.db initialized.")
+
+    except Exception as e:
+        print(f"[VOUCH DB ERROR] {e}")
 
 
-def save_vouch_to_db(
-    guild_id: int,
-    target_id: int,
-    author_id: int,
-    review: str,
-    timestamp: str,
+def add_vouch(
+    guild_id,
+    user_id,
+    author_id,
+    review,
+    timestamp
 ):
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.execute(
+    with sqlite3.connect(DB_FILE) as db:
+        cursor = db.execute(
             """
-            INSERT INTO vouches (
+            INSERT INTO vouches
+            (
                 guild_id,
-                target_id,
+                user_id,
                 author_id,
                 review,
                 timestamp
@@ -102,42 +75,107 @@ def save_vouch_to_db(
             VALUES (?, ?, ?, ?, ?)
             """,
             (
-                str(guild_id),
-                str(target_id),
-                str(author_id),
+                guild_id,
+                user_id,
+                author_id,
                 review,
-                timestamp,
-            ),
+                timestamp
+            )
         )
 
-        conn.commit()
+        db.commit()
+
+        return cursor.lastrowid
 
 
-def get_vouches_from_db(guild_id: int, target_id: int):
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.row_factory = sqlite3.Row
+def get_vouches(guild_id, user_id):
+    with sqlite3.connect(DB_FILE) as db:
+        db.row_factory = sqlite3.Row
 
-        rows = conn.execute(
+        rows = db.execute(
             """
             SELECT
                 id,
                 guild_id,
-                target_id,
+                user_id,
                 author_id,
                 review,
                 timestamp
             FROM vouches
             WHERE guild_id = ?
-            AND target_id = ?
+            AND user_id = ?
             ORDER BY id ASC
             """,
             (
-                str(guild_id),
-                str(target_id),
-            ),
+                guild_id,
+                user_id
+            )
         ).fetchall()
 
         return [dict(row) for row in rows]
+
+
+# =========================
+# JSON BACKUP
+# =========================
+
+def load_json():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not JSON_FILE.exists():
+        JSON_FILE.write_text(
+            "{}",
+            encoding="utf-8"
+        )
+        return {}
+
+    try:
+        data = json.loads(
+            JSON_FILE.read_text(
+                encoding="utf-8"
+            )
+        )
+
+        return data if isinstance(data, dict) else {}
+
+    except Exception:
+        return {}
+
+
+def save_json(
+    guild_id,
+    user_id,
+    author_id,
+    review,
+    timestamp
+):
+    data = load_json()
+
+    guild_data = data.setdefault(
+        str(guild_id),
+        {}
+    )
+
+    entries = guild_data.setdefault(
+        str(user_id),
+        []
+    )
+
+    entries.append({
+        "author_id": author_id,
+        "review": review,
+        "timestamp": timestamp
+    })
+
+    JSON_FILE.write_text(
+        json.dumps(
+            data,
+            indent=2
+        ),
+        encoding="utf-8"
+    )
+
+    return len(entries)
 
 
 # =========================
@@ -145,19 +183,28 @@ def get_vouches_from_db(guild_id: int, target_id: int):
 # =========================
 
 class Vouch(commands.Cog):
-    """Message-based +rep / vouch system."""
 
     def __init__(self, bot):
         self.bot = bot
+
         init_database()
+
+        print("[VOUCH] Vouch cog initialized.")
+
+    # =========================
+    # +REP
+    # =========================
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
 
-        if message.author.bot or message.guild is None:
+        if message.author.bot:
             return
 
-        content = (message.content or "").strip()
+        if not message.guild:
+            return
+
+        content = message.content.strip()
 
         match = VOUCH_RE.fullmatch(content)
 
@@ -167,97 +214,99 @@ class Vouch(commands.Cog):
         target_id = int(match.group(1))
         review = match.group(2).strip()
 
-        if not review:
-            return
-
         if len(review) > 1000:
             await message.reply(
                 "❌ Your review is too long. Keep it under 1000 characters.",
-                mention_author=False,
+                mention_author=False
             )
             return
 
-        # Find target member
+        # =========================
+        # FIND TARGET
+        # =========================
+
         target = message.guild.get_member(target_id)
 
         if target is None:
             try:
-                target = await message.guild.fetch_member(target_id)
+                target = await message.guild.fetch_member(
+                    target_id
+                )
             except (
                 discord.NotFound,
                 discord.Forbidden,
-                discord.HTTPException,
-            ):
-                target = None
-
-        if target is None:
-            try:
-                target = await self.bot.fetch_user(target_id)
-            except (
-                discord.NotFound,
-                discord.Forbidden,
-                discord.HTTPException,
+                discord.HTTPException
             ):
                 target = None
 
         if target is None:
             await message.reply(
                 "❌ I couldn't find that user.",
-                mention_author=False,
+                mention_author=False
             )
             return
 
-        # Prevent self-vouch
+        # =========================
+        # SELF VOUCH
+        # =========================
+
         if target.id == message.author.id:
             await message.reply(
                 "❌ You can't vouch yourself.",
-                mention_author=False,
+                mention_author=False
             )
             return
 
         timestamp = discord.utils.utcnow().isoformat()
 
         # =========================
-        # SAVE TO JSON
-        # =========================
-
-        data = load_data()
-
-        guild_data = data.setdefault(
-            str(message.guild.id),
-            {},
-        )
-
-        entries = guild_data.setdefault(
-            str(target.id),
-            [],
-        )
-
-        entries.append(
-            {
-                "author_id": message.author.id,
-                "review": review,
-                "timestamp": timestamp,
-            }
-        )
-
-        save_data(data)
-
-        # =========================
-        # SAVE TO vouch.db
+        # SAVE DATABASE
         # =========================
 
         try:
-            save_vouch_to_db(
+            add_vouch(
                 guild_id=message.guild.id,
-                target_id=target.id,
+                user_id=target.id,
                 author_id=message.author.id,
                 review=review,
-                timestamp=timestamp,
+                timestamp=timestamp
             )
 
         except Exception as e:
-            print(f"[VOUCH DB ERROR] {e}")
+            print(
+                f"[VOUCH DB ERROR] {e}"
+            )
+
+            await message.reply(
+                "❌ Failed to save the vouch.",
+                mention_author=False
+            )
+            return
+
+        # =========================
+        # SAVE JSON
+        # =========================
+
+        try:
+            total = save_json(
+                guild_id=message.guild.id,
+                user_id=target.id,
+                author_id=message.author.id,
+                review=review,
+                timestamp=timestamp
+            )
+
+        except Exception as e:
+            print(
+                f"[VOUCH JSON ERROR] {e}"
+            )
+
+            total = len(
+                get_vouches(
+                    message.guild.id,
+                    target.id
+                )
+            )
 
         # =========================
         # EMBED
@@ -266,44 +315,57 @@ class Vouch(commands.Cog):
         embed = discord.Embed(
             title="⭐ Vouch Added",
             description=(
-                f"{message.author.mention} vouched for "
-                f"{target.mention}!"
+                f"{message.author.mention} "
+                f"vouched for {target.mention}!"
             ),
             color=0x57F287,
-            timestamp=discord.utils.utcnow(),
+            timestamp=discord.utils.utcnow()
         )
 
         embed.add_field(
             name="👤 User",
             value=target.mention,
-            inline=True,
+            inline=True
         )
 
         embed.add_field(
             name="⭐ Total Vouches",
-            value=str(len(entries)),
-            inline=True,
+            value=str(total),
+            inline=True
         )
 
         embed.add_field(
             name="💬 Review",
             value=review,
-            inline=False,
+            inline=False
         )
 
         embed.set_footer(
             text="Crafted by Escobar | Hardik"
         )
 
+        # =========================
+        # DELETE ORIGINAL MESSAGE
+        # =========================
+
         try:
             await message.delete()
         except (
             discord.Forbidden,
-            discord.NotFound,
+            discord.NotFound
         ):
             pass
 
-        await message.channel.send(embed=embed)
+        # =========================
+        # SEND EMBED
+        # =========================
+
+        try:
+            await message.channel.send(
+                embed=embed
+            )
+        except discord.Forbidden:
+            pass
 
     # =========================
     # /VOUCHES
@@ -311,83 +373,73 @@ class Vouch(commands.Cog):
 
     @commands.hybrid_command(
         name="vouches",
-        description="View a user's vouches",
+        description="View a user's vouches"
     )
     @commands.guild_only()
     async def vouches(
         self,
-        ctx: commands.Context,
-        user: discord.Member = None,
+        ctx,
+        user: discord.Member = None
     ):
 
         user = user or ctx.author
 
-        # Read from DATABASE
-        entries = get_vouches_from_db(
+        entries = get_vouches(
             ctx.guild.id,
-            user.id,
+            user.id
         )
 
-        # Fallback to JSON if DB has no data
         if not entries:
-            data = load_data()
-
-            json_entries = data.get(
-                str(ctx.guild.id),
-                {},
-            ).get(
-                str(user.id),
-                [],
+            embed = discord.Embed(
+                title="⭐ Vouches",
+                description=(
+                    f"{user.mention} has no vouches yet."
+                ),
+                color=0x5865F2
             )
 
-            entries = [
-                {
-                    "author_id": entry.get("author_id"),
-                    "review": entry.get("review", ""),
-                    "timestamp": entry.get("timestamp", ""),
-                }
-                for entry in json_entries
-            ]
-
-        if not entries:
-            await ctx.send(
-                f"⭐ {user.mention} has no vouches yet."
+            embed.set_footer(
+                text="Crafted by Escobar | Hardik"
             )
+
+            await ctx.send(embed=embed)
             return
 
-        # Latest 10
-        recent_entries = entries[-10:]
+        recent = entries[-10:]
 
         start_number = max(
             1,
-            len(entries) - len(recent_entries) + 1,
+            len(entries) - len(recent) + 1
         )
 
         lines = []
 
-        for i, entry in enumerate(
-            recent_entries,
-            start=start_number,
+        for number, entry in enumerate(
+            recent,
+            start=start_number
         ):
 
             author_id = int(
-                entry.get("author_id", 0)
+                entry["author_id"]
             )
 
-            author = ctx.guild.get_member(author_id)
+            author = ctx.guild.get_member(
+                author_id
+            )
 
-            if author:
-                author_text = author.mention
-            else:
-                author_text = f"<@{author_id}>"
+            author_text = (
+                author.mention
+                if author
+                else f"<@{author_id}>"
+            )
 
             review = entry.get(
                 "review",
-                "",
+                "No review"
             )
 
             lines.append(
-                f"**#{i}** — {author_text}\n"
+                f"**#{number}** — {author_text}\n"
                 f"> {review}"
             )
 
@@ -395,20 +447,31 @@ class Vouch(commands.Cog):
             title=f"⭐ Vouches for {user.display_name}",
             description="\n\n".join(lines),
             color=0x5865F2,
+            timestamp=discord.utils.utcnow()
         )
 
         embed.add_field(
             name="⭐ Total",
             value=str(len(entries)),
-            inline=True,
+            inline=True
         )
 
         embed.set_footer(
             text="Crafted by Escobar | Hardik"
         )
 
-        await ctx.send(embed=embed)
+        await ctx.send(
+            embed=embed
+        )
 
+
+# =========================
+# SETUP
+# =========================
 
 async def setup(bot):
-    await bot.add_cog(Vouch(bot))
+    await bot.add_cog(
+        Vouch(bot)
+    )
+
+    print("[VOUCH] vouch.py loaded successfully.")
