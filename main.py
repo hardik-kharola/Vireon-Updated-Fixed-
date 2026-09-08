@@ -526,7 +526,7 @@ async def on_ready():
         'cogs.vc', 'cogs.noprefix', 'cogs.perms', 'cogs.antinuke', 'cogs.leaderboard',
         'cogs.logger', 'cogs.tickets', 'cogs.embed', 'cogs.roles', 'cogs.logging', 
         'cogs.extra', 'cogs.j2c', 'cogs.responders', 'cogs.channels', 'cogs.upi', 
-        'cogs.ltc', 'cogs.invites'
+        'cogs.ltc', 'cogs.vouch', 'cogs.invites'
     ]
     for cog in all_cogs:
         if cog not in bot.extensions:
